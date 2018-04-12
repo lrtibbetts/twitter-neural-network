@@ -17,6 +17,7 @@ stemmer = nltk.PorterStemmer()
 sentiment_analyzer = VS()
 
 # FUNCTIONS
+
 # remove handles, extra spaces, urls, hashtags, and html
 def preprocess(text_string):
     text_without_handles = re.sub(r'@[\w!:]+', '', text_string)
