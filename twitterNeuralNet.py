@@ -10,13 +10,25 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 import string
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer as VS
 from textstat.textstat import*
+import keras
+from keras.models import Sequential
+from keras.layers import Dense, Dropout
+from keras.layers import Flatten
+from keras.layers.embeddings import Embedding
+from keras.preprocessing import sequence
+from sklearn.model_selection import train_test_split
+import matplotlib.pyplot as plt
+import seaborn
 
-# https://towardsdatascience.com/another-twitter-sentiment-analysis-bb5b01ebad90
+# code here utilized: https://github.com/t-davidson/hate-speech-and-offensive-language/blob/master/classifier/classifier.py
+# tutorial here utilized: https://towardsdatascience.com/another-twitter-sentiment-analysis-bb5b01ebad90
+# tfidf doc: http://scikit-learn.org/stable/modules/generated/sklearn.feature_extraction.text.TfidfVectorizer.html#sklearn.feature_extraction.text.TfidfVectorizer
 
+# NLTK stemmer and Vader Sentiment analyzer
 stemmer = nltk.PorterStemmer()
 sentiment_analyzer = VS()
 
-# FUNCTIONS
+# Fxn definitions
 
 # remove handles, extra spaces, urls, hashtags, and html
 def preprocess(text_string):
@@ -33,10 +45,12 @@ def tokenize(tweet):
     tokens = [stemmer.stem(t) for t in tweet.split()]
     return tokens
 
+# tokenizer without stemming
 def basic_tokenize(tweet):
     tweet = re.sub(r'[^\w\s]', '', tweet.lower())
     return tweet.split()
 
+# generate list of part-of-speech tags
 def get_pos_tags(tweets):
     tweet_tags = []
     for t in tweets:
@@ -47,6 +61,7 @@ def get_pos_tags(tweets):
         tweet_tags.append(tag_str)
     return tweet_tags
 
+# generate list of other features for each tweet
 def other_features(tweet):
     sentiment = sentiment_analyzer.polarity_scores(tweet)
     words = preprocess(tweet)
@@ -67,6 +82,7 @@ def other_features(tweet):
                 num_unique_terms, sentiment['compound']]
     return features
 
+# compile lists of features for each tweet into numpy array
 def get_features(tweets):
     feats=[]
     for t in tweets:
@@ -84,14 +100,6 @@ def main():
     tweets = df.tweet # isolate text of tweets
     tweets = [x for x in tweets if type(x) == str] # check that all tweets are type string
 
-    # test the fxns preprocess and tokenize, print results for first 30 lines
-    '''for x in range(len(tweets)) :
-        tweets[x] = preprocess(tweets[x])
-        tweets[x] = tokenize(tweets[x])
-
-    for x in range(30) :
-        print(tweets[x])
-    '''
     vectorizer = TfidfVectorizer(tokenizer=tokenize, preprocessor=preprocess, ngram_range=(1, 3),
         stop_words=stop_words, use_idf=True, smooth_idf=False, norm=None, decode_error='replace',
         max_features=10000, min_df=5, max_df=0.75)
@@ -102,9 +110,10 @@ def main():
     
     # generate tfidf array using sklearn.feature_extraction
     tfidf = vectorizer.fit_transform(tweets).toarray()
-    vocab = {v:i for i, v in enumerate(vectorizer.get_feature_names())}
+
+    '''vocab = {v:i for i, v in enumerate(vectorizer.get_feature_names())}
     idf_vals = vectorizer.idf_
-    idf_dict = {i:idf_vals[i] for i in vocab.values()} #keys are indices; values are IDF scores
+    idf_dict = {i:idf_vals[i] for i in vocab.values()} #keys are indices, values are IDF scores
 
     tweet_tags = get_pos_tags(tweets)
     pos = pos_vectorizer.fit_transform(pd.Series(tweet_tags)).toarray()
@@ -112,6 +121,43 @@ def main():
 
     feats = get_features(tweets)
     M = np.concatenate([tfidf, pos, feats], axis=1)
-    print(M.shape)
+    print(M.shape) # dimensions: number of tweets x number of features'''
+
+    # train neural network
+    X = pd.DataFrame(tfidf)
+    y = df['class'].astype(int)
+    x_train, x_test, y_train, y_test = train_test_split(X, y, random_state=42, test_size=0.2)
+
+    seed = 7
+    np.random.seed(seed)
+
+    # https://www.kaggle.com/jacklinggu/tfidf-to-keras-dense-neural-network
+    model = Sequential()
+    model.add(Dense(64, activation='relu', input_dim=7234))
+    model.add(Dense(1, activation='sigmoid'))
+    model.compile(optimizer='adam',
+                  loss='binary_crossentropy',
+                  metrics=['accuracy'])
+    model.fit(x=x_train, y=y_train, batch_size=32, epochs=5, verbose=1, validation_data=(x_test, y_test))
+
+    # https://keras.io/models/model/
+    y_preds = model.predict_classes(x_test)
+
+    # confusion matrix
+    from sklearn.metrics import confusion_matrix
+    confusion_matrix = confusion_matrix(y_test, y_preds)
+    print(confusion_matrix)
+    matrix_proportions = np.zeros((3, 3))
+    for i in range(0, 3):
+        matrix_proportions[i, :] = confusion_matrix[i, :] / float(confusion_matrix[i, :].sum())
+    names = ['Hate', 'Offensive', 'Neither']
+    confusion_df = pd.DataFrame(matrix_proportions, index=names, columns=names)
+    plt.figure(figsize=(5, 5))
+    seaborn.heatmap(confusion_df, annot=True, annot_kws={"size": 12}, cmap='gist_gray_r', cbar=False, square=True,
+                    fmt='.2f')
+    plt.ylabel(r'True categories', fontsize=14)
+    plt.xlabel(r'Predicted categories', fontsize=14)
+    plt.tick_params(labelsize=12)
+    plt.show()
 
 main()
