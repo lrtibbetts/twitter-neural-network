@@ -1,34 +1,22 @@
-import tensorflow as tf
 import pandas as pd
 import numpy as np
-import scipy
-import re
 import nltk
 from nltk.corpus import stopwords
-from nltk.stem.porter import *
 from sklearn.feature_extraction.text import TfidfVectorizer
-import string
-from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer as VS
 from textstat.textstat import*
-import keras
 from keras.models import Sequential
-from keras.layers import Dense, Dropout
-from keras.layers import Flatten
-from keras.layers.embeddings import Embedding
-from keras.preprocessing import sequence
+from keras.layers import Dense
 from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
 import seaborn
+import keras
 
 # code here utilized: https://github.com/t-davidson/hate-speech-and-offensive-language/blob/master/classifier/classifier.py
-# tutorial here utilized: https://towardsdatascience.com/another-twitter-sentiment-analysis-bb5b01ebad90
-# tfidf doc: http://scikit-learn.org/stable/modules/generated/sklearn.feature_extraction.text.TfidfVectorizer.html#sklearn.feature_extraction.text.TfidfVectorizer
 
-# NLTK stemmer and Vader Sentiment analyzer
+# NLTK stemmer
 stemmer = nltk.PorterStemmer()
-sentiment_analyzer = VS()
 
-# Fxn definitions
+# Function definitions
 
 # remove handles, extra spaces, urls, hashtags, and html
 def preprocess(text_string):
@@ -45,50 +33,6 @@ def tokenize(tweet):
     tokens = [stemmer.stem(t) for t in tweet.split()]
     return tokens
 
-# tokenizer without stemming
-def basic_tokenize(tweet):
-    tweet = re.sub(r'[^\w\s]', '', tweet.lower())
-    return tweet.split()
-
-# generate list of part-of-speech tags
-def get_pos_tags(tweets):
-    tweet_tags = []
-    for t in tweets:
-        tokens = basic_tokenize(preprocess(t))
-        tags = nltk.pos_tag(tokens)
-        tag_list = [x[1] for x in tags]  # isolate only the tag, removing the words themselves
-        tag_str = " ".join(tag_list)  # convert to string
-        tweet_tags.append(tag_str)
-    return tweet_tags
-
-# generate list of other features for each tweet
-def other_features(tweet):
-    sentiment = sentiment_analyzer.polarity_scores(tweet)
-    words = preprocess(tweet)
-    syllables = textstat.syllable_count(words) # count syllables in words
-    num_chars = sum(len(w) for w in words) # num chars in words
-    num_chars_total = len(tweet)
-    num_terms = len(tweet.split())
-    num_words = len(words.split())
-    avg_syl = round(float((syllables+0.001))/float(num_words+0.001),4)
-    num_unique_terms = len(set(words.split()))
-
-    # Modified FK grade, where avg words per sentence is just num words/1
-    FKRA = round(float(0.39 * float(num_words)/1.0) + float(11.8 * avg_syl) - 15.59,1)
-    # Modified FRE score, where sentence fixed to 1
-    FRE = round(206.835 - 1.015*(float(num_words)/1.0) - (84.6*float(avg_syl)),2)
-
-    features = [FKRA, FRE, syllables, num_chars, num_chars_total, num_terms, num_words,
-                num_unique_terms, sentiment['compound']]
-    return features
-
-# compile lists of features for each tweet into numpy array
-def get_features(tweets):
-    feats=[]
-    for t in tweets:
-        feats.append(other_features(t))
-    return np.array(feats)
-
 def main():
     # use nltk stopwords (unimportant words)
     stop_words = stopwords.words('english')
@@ -104,43 +48,26 @@ def main():
         stop_words=stop_words, use_idf=True, smooth_idf=False, norm=None, decode_error='replace',
         max_features=10000, min_df=5, max_df=0.75)
 
-    pos_vectorizer = TfidfVectorizer(lowercase=False, preprocessor=None, ngram_range=(1, 3),
-        stop_words=None, use_idf=False, smooth_idf=False, norm=None, decode_error='replace',
-        max_features=5000, min_df=5, max_df=0.75)
-    
-    # generate tfidf array using sklearn.feature_extraction
+    # generate tfidf array using sklearn.feature_extraction and convert to array
     tfidf = vectorizer.fit_transform(tweets).toarray()
 
-    '''vocab = {v:i for i, v in enumerate(vectorizer.get_feature_names())}
-    idf_vals = vectorizer.idf_
-    idf_dict = {i:idf_vals[i] for i in vocab.values()} #keys are indices, values are IDF scores
-
-    tweet_tags = get_pos_tags(tweets)
-    pos = pos_vectorizer.fit_transform(pd.Series(tweet_tags)).toarray()
-    pos_vocab = {v:i for i, v in enumerate(pos_vectorizer.get_feature_names())}
-
-    feats = get_features(tweets)
-    M = np.concatenate([tfidf, pos, feats], axis=1)
-    print(M.shape) # dimensions: number of tweets x number of features'''
-
-    # train neural network
+    # prepare data
     X = pd.DataFrame(tfidf)
     y = df['class'].astype(int)
-    x_train, x_test, y_train, y_test = train_test_split(X, y, random_state=42, test_size=0.2)
+    x_train, x_test, y_train, y_test = train_test_split(X, y, random_state=42, test_size=0.1)
+    y_train_labels = keras.utils.to_categorical(y_train, num_classes=3)
+    y_test_labels = keras.utils.to_categorical(y_test, num_classes=3)
 
-    seed = 7
-    np.random.seed(seed)
-
-    # https://www.kaggle.com/jacklinggu/tfidf-to-keras-dense-neural-network
+    # set up neural network
     model = Sequential()
     model.add(Dense(64, activation='relu', input_dim=7234))
-    model.add(Dense(1, activation='sigmoid'))
+    model.add(Dense(3, activation='softmax'))
     model.compile(optimizer='adam',
-                  loss='binary_crossentropy',
+                  loss='categorical_crossentropy',
                   metrics=['accuracy'])
-    model.fit(x=x_train, y=y_train, batch_size=32, epochs=5, verbose=1, validation_data=(x_test, y_test))
+    model.fit(x_train, y_train_labels, batch_size=64, epochs=5, verbose=1,
+              validation_data=(x_test, y_test_labels))
 
-    # https://keras.io/models/model/
     y_preds = model.predict_classes(x_test)
 
     # confusion matrix
