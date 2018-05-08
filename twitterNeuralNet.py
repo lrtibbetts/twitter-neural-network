@@ -5,13 +5,13 @@ from nltk.corpus import stopwords
 from sklearn.feature_extraction.text import TfidfVectorizer
 from textstat.textstat import*
 from keras.models import Sequential
-from keras.layers import Dense
+from keras.layers import Dense, Dropout
 from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
 import seaborn
 import keras
 
-# code here utilized: https://github.com/t-davidson/hate-speech-and-offensive-language/blob/master/classifier/classifier.py
+# resource utilized: https://github.com/t-davidson/hate-speech-and-offensive-language/blob/master/classifier/classifier.py
 
 # NLTK stemmer
 stemmer = nltk.PorterStemmer()
@@ -44,6 +44,7 @@ def main():
     tweets = df.tweet # isolate text of tweets
     tweets = [x for x in tweets if type(x) == str] # check that all tweets are type string
 
+    # tfidf vectorizer
     vectorizer = TfidfVectorizer(tokenizer=tokenize, preprocessor=preprocess, ngram_range=(1, 3),
         stop_words=stop_words, use_idf=True, smooth_idf=False, norm=None, decode_error='replace',
         max_features=10000, min_df=5, max_df=0.75)
@@ -54,20 +55,19 @@ def main():
     # prepare data
     X = pd.DataFrame(tfidf)
     y = df['class'].astype(int)
-    x_train, x_test, y_train, y_test = train_test_split(X, y, random_state=42, test_size=0.1)
+    x_train, x_test, y_train, y_test = train_test_split(X, y, random_state=42, test_size=0.15)
     y_train_labels = keras.utils.to_categorical(y_train, num_classes=3)
     y_test_labels = keras.utils.to_categorical(y_test, num_classes=3)
 
     # set up neural network
     model = Sequential()
-    model.add(Dense(64, activation='relu', input_dim=7234))
+    model.add(Dense(256, activation='relu', input_dim=7234))
     model.add(Dense(3, activation='softmax'))
-    model.compile(optimizer='adam',
+    model.compile(optimizer='rmsprop',
                   loss='categorical_crossentropy',
                   metrics=['accuracy'])
-    model.fit(x_train, y_train_labels, batch_size=64, epochs=5, verbose=1,
+    model.fit(x_train, y_train_labels, batch_size=16, epochs=5, verbose=1,
               validation_data=(x_test, y_test_labels))
-
     y_preds = model.predict_classes(x_test)
 
     # confusion matrix
